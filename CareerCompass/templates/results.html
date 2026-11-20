@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Assessment Results & Learning Roadmaps – CareerCompass</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+  <!-- Navigation Bar -->
+  <header class="navbar">
+    <div class="container nav-container">
+      <a href="{{ url_for('index') }}" class="brand-logo">
+        <svg class="brand-icon" viewBox="0 0 24 24">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+        </svg>
+        <span>CareerCompass</span>
+      </a>
+
+      <button class="mobile-nav-toggle" id="mobileNavToggle" aria-label="Toggle navigation">☰</button>
+
+      <nav>
+        <ul class="nav-links" id="navLinks">
+          <li><a href="{{ url_for('index') }}#home" class="nav-link">Home</a></li>
+          <li><a href="{{ url_for('about') }}" class="nav-link">About CareerCompass</a></li>
+          <li><a href="{{ url_for('sdgs') }}" class="nav-link">Our SDGs</a></li>
+          <li><a href="{{ url_for('dashboard') }}" class="nav-link" style="font-weight: 700; color: var(--forest-green);">Dashboard</a></li>
+          <li><a href="{{ url_for('profile') }}" class="nav-link">My Profile</a></li>
+          <li><a href="#roadmaps-section" class="nav-link">Learning Roadmaps</a></li>
+          <li>
+            <form action="{{ url_for('logout') }}" method="POST" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="nav-cta-btn" style="border:none; cursor:pointer;">Sign Out</button>
+            </form>
+          </li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Flash Messages Container -->
+  <div class="container flash-container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash-message flash-{{ category }}">
+            <span>{{ message }}</span>
+            <button onclick="this.parentElement.remove()" style="background:none; border:none; cursor:pointer; font-size:1.1rem; color:inherit;">&times;</button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+  </div>
+
+  <main style="padding: 40px 0 60px;">
+    <div class="container">
+
+      <!-- Breadcrumbs & Actions -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 12px;">
+        <div>
+          <a href="{{ url_for('dashboard') }}" style="font-weight: 600; color: var(--forest-green); font-size: 0.92rem;">&larr; Back to Student Dashboard</a>
+          <span style="color: var(--text-muted); margin: 0 8px;">&bull;</span>
+          <span style="font-size: 0.9rem; color: var(--text-muted);">Assessment Completed on {{ attempt.taken_at | format_date }}</span>
+        </div>
+        <div style="display: flex; gap: 10px;">
+          <a href="{{ url_for('dashboard') }}" class="btn btn-outline btn-sm">Dashboard Overview</a>
+          <a href="#roadmaps-section" class="btn btn-secondary btn-sm">Jump to Roadmaps &darr;</a>
+        </div>
+      </div>
+
+      <!-- HEADER BANNER: BEST TWO CAREER OPTIONS IDENTIFIED -->
+      {% set rec_score_info = domain_scores.get(attempt.recommended_career, {'score': 0, 'percentage': 0, 'level': 'Beginner'}) %}
+      {% set alt_score_info = domain_scores.get(attempt.alternative_career, {'score': 0, 'percentage': 0, 'level': 'Beginner'}) if alternative_meta else None %}
+
+      <div class="results-banner">
+        <span class="banner-badge">Diagnostic Evaluation Complete</span>
+        <h1 class="banner-title">Your Top Two Career Pathways</h1>
+        <div class="banner-scores">
+          Total Assessment Score: <strong>{{ attempt.score_total }} / 25</strong> ({{ attempt.percentage_total }}%) &bull;
+          Aptitude Evaluated Across All 5 Tech Domains
+        </div>
+        <p class="banner-explanation">
+          {{ attempt.explanation }}
+        </p>
+        <p style="font-size: 0.92rem; background: rgba(255, 255, 255, 0.15); padding: 10px 16px; border-radius: var(--radius-sm); margin-top: 10px; border-left: 3px solid var(--butter-yellow);">
+          <strong>Student Choice Enabled:</strong> Review the detailed roadmaps and skill gaps for both top career options below, then select your preferred path to set your active learning focus on your dashboard.
+        </p>
+        <div class="banner-disclaimer" style="margin-top: 14px;">
+          Note: This recommendation is generated via a transparent, rule-based diagnostic algorithm evaluating foundational and practical engineering logic (not an unverified deep neural black box). It serves as an exploratory career-fit indicator to guide skill development.
+        </div>
+      </div>
+
+      <!-- SIDE-BY-SIDE COMPARISON: CHOOSE BETWEEN TOP TWO OPTIONS -->
+      <div style="margin-bottom: 40px;">
+        <div style="margin-bottom: 16px;">
+          <span class="section-tag" style="margin-bottom: 4px;">Career Decision</span>
+          <h2 style="font-size: 1.5rem; color: var(--forest-green); font-weight: 800;">
+            Compare Top 2 Options & Choose Your Active Path
+          </h2>
+          <p style="font-size: 0.92rem; color: var(--text-muted);">
+            You can select either track as your primary focus. Your active choice will be highlighted on your dashboard, but progress on both roadmaps is saved.
+          </p>
+        </div>
+
+        <div class="compare-cards-grid">
+          <!-- OPTION 1 CARD (PRIMARY RECOMMENDATION) -->
+          <div class="dash-card" style="border: 2.5px solid var(--forest-green); background-color: #FAFDF9;">
+            <div class="dash-card-header">
+              <div>
+                <span style="font-size: 0.78rem; font-weight: 800; color: var(--forest-green); text-transform: uppercase;">Option 1: Primary Recommendation</span>
+                <h3 style="font-size: 1.35rem; color: var(--forest-green); font-weight: 800; margin-top: 2px;">
+                  {{ recommended_meta.title }}
+                </h3>
+              </div>
+              <span class="dash-pill pill-strong" style="font-size: 0.82rem;">
+                {{ rec_score_info.score }}/5 &bull; {{ rec_score_info.level }}
+              </span>
+            </div>
+
+            <p style="font-size: 0.9rem; color: var(--text-dark); margin-bottom: 12px; line-height: 1.5;">
+              {{ recommended_meta.description }}
+            </p>
+
+            <div style="margin-bottom: 10px;">
+              <span style="font-size: 0.8rem; font-weight: 700; color: var(--warm-brown);">Required Core Skills:</span>
+              <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;">
+                {% for sk in recommended_meta.core_skills %}
+                  <span class="skill-tag">{{ sk }}</span>
+                {% endfor %}
+              </div>
+            </div>
+
+            <div style="margin-bottom: 16px;">
+              <span style="font-size: 0.8rem; font-weight: 700; color: var(--warm-brown);">Target Industry Roles:</span>
+              <p style="font-size: 0.85rem; color: var(--forest-green-dark); font-weight: 600; margin-top: 2px;">
+                {{ recommended_meta.potential_roles | join(' • ') }}
+              </p>
+            </div>
+
+            <div style="margin-top: auto; padding-top: 14px; border-top: 1px solid var(--light-sage);">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-size: 0.82rem; font-weight: 700; color: var(--forest-green);">Roadmap Completion:</span>
+                <span style="font-size: 0.82rem; font-weight: 700; color: var(--forest-green);">{{ roadmap_stats.percentage }}%</span>
+              </div>
+              <div class="progress-bar-container" style="height: 6px; margin-bottom: 14px;">
+                <div class="progress-bar-fill" data-width="{{ roadmap_stats.percentage }}"></div>
+              </div>
+
+              <div style="background: #E8F5E9; padding: 10px; border-radius: var(--radius-sm); text-align: center; margin-bottom: 8px; border: 1px solid #C8E6C9;">
+                <strong style="color: #2E7D32; font-size: 0.9rem;">&check; Currently Active Track (On Dashboard)</strong>
+              </div>
+              <button onclick="switchRoadmapTab('rec')" class="btn btn-outline btn-sm" style="width: 100%;">
+                View {{ recommended_meta.title }} Roadmap &darr;
+              </button>
+            </div>
+          </div>
+
+          <!-- OPTION 2 CARD (ALTERNATIVE CAREER DIRECTION) -->
+          {% if alternative_meta %}
+            <div class="dash-card" style="border: 2px solid var(--sage-green);">
+              <div class="dash-card-header">
+                <div>
+                  <span style="font-size: 0.78rem; font-weight: 800; color: var(--warm-brown); text-transform: uppercase;">Option 2: Strong Alternative Match</span>
+                  <h3 style="font-size: 1.35rem; color: var(--forest-green); font-weight: 800; margin-top: 2px;">
+                    {{ alternative_meta.title }}
+                  </h3>
+                </div>
+                <span class="dash-pill pill-dev" style="font-size: 0.82rem;">
+                  {{ alt_score_info.score }}/5 &bull; {{ alt_score_info.level }}
+                </span>
+              </div>
+
+              <p style="font-size: 0.9rem; color: var(--text-dark); margin-bottom: 12px; line-height: 1.5;">
+                {{ alternative_meta.description }}
+              </p>
+
+              <div style="margin-bottom: 10px;">
+                <span style="font-size: 0.8rem; font-weight: 700; color: var(--warm-brown);">Required Core Skills:</span>
+                <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;">
+                  {% for sk in alternative_meta.core_skills %}
+                    <span class="skill-tag">{{ sk }}</span>
+                  {% endfor %}
+                </div>
+              </div>
+
+              <div style="margin-bottom: 16px;">
+                <span style="font-size: 0.8rem; font-weight: 700; color: var(--warm-brown);">Target Industry Roles:</span>
+                <p style="font-size: 0.85rem; color: var(--forest-green-dark); font-weight: 600; margin-top: 2px;">
+                  {{ alternative_meta.potential_roles | join(' • ') }}
+                </p>
+              </div>
+
+              <div style="margin-top: auto; padding-top: 14px; border-top: 1px solid var(--light-sage);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                  <span style="font-size: 0.82rem; font-weight: 700; color: var(--warm-brown);">Roadmap Completion:</span>
+                  <span style="font-size: 0.82rem; font-weight: 700; color: var(--warm-brown);">{{ alt_roadmap_stats.percentage if alt_roadmap_stats else 0 }}%</span>
+                </div>
+                <div class="progress-bar-container" style="height: 6px; margin-bottom: 14px;">
+                  <div class="progress-bar-fill" data-width="{{ alt_roadmap_stats.percentage if alt_roadmap_stats else 0 }}"></div>
+                </div>
+
+                <!-- Choose as Primary Track Button -->
+                <form action="{{ url_for('select_career_track') }}" method="POST" style="margin-bottom: 8px;">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="assessment_id" value="{{ attempt.id }}">
+                  <input type="hidden" name="chosen_career" value="{{ alternative_meta.id }}">
+                  <button type="submit" class="btn btn-accent btn-sm" style="width: 100%;">
+                    Select {{ alternative_meta.title }} as My Primary Track &rarr;
+                  </button>
+                </form>
+
+                <button onclick="switchRoadmapTab('alt')" class="btn btn-outline btn-sm" style="width: 100%;">
+                  View {{ alternative_meta.title }} Roadmap &darr;
+                </button>
+              </div>
+            </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- DUAL ROADMAPS & SKILL GAP SECTION WITH TAB SWITCHER -->
+      <div id="roadmaps-section" style="margin-bottom: 40px;">
+        <div style="margin-bottom: 18px;">
+          <span class="section-tag" style="margin-bottom: 4px;">Interactive Curriculum</span>
+          <h2 style="font-size: 1.55rem; color: var(--forest-green); font-weight: 800;">
+            Learning Roadmaps for Both Career Options
+          </h2>
+          <p style="font-size: 0.92rem; color: var(--text-muted);">
+            Click either tab below to inspect the 3-stage roadmap, skill gap, and verified free learning resources. Toggling task checkboxes saves progress in your database profile.
+          </p>
+        </div>
+
+        <!-- Tab Buttons -->
+        <div class="roadmap-tabs">
+          <button id="tabBtnRec" class="roadmap-tab-btn active" onclick="switchRoadmapTab('rec')">
+            <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+            Option 1: {{ recommended_meta.title }} (Active Track)
+          </button>
+          {% if alternative_meta %}
+            <button id="tabBtnAlt" class="roadmap-tab-btn" onclick="switchRoadmapTab('alt')">
+              <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
+              Option 2: {{ alternative_meta.title }} (Alternative)
+            </button>
+          {% endif %}
+        </div>
+
+        <!-- ================================================================ -->
+        <!-- TAB CONTENT 1: RECOMMENDED CAREER ROADMAP & SKILL GAP -->
+        <!-- ================================================================ -->
+        <div id="tabContentRec">
+          <!-- Skill Gap Analysis Card for Option 1 -->
+          <div style="background: var(--pure-white); padding: 24px 28px; border-radius: var(--radius-lg); border: 1.5px solid var(--border-color); box-shadow: var(--shadow-sm); margin-bottom: 24px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
+              <div>
+                <span class="section-tag" style="margin-bottom: 2px;">Skill Analysis</span>
+                <h3 style="font-size: 1.3rem; color: var(--forest-green); font-weight: 700;">
+                  Skill Gap for {{ recommended_meta.title }}
+                </h3>
+              </div>
+              <span class="dash-pill pill-strong">&check; Active Track</span>
+            </div>
+
+            <div class="skill-gap-grid" style="margin-bottom: 0;">
+              <!-- Already Have -->
+              <div class="skill-gap-card sg-green">
+                <h4 class="sg-card-title">
+                  <svg width="18" height="18" fill="#2E7D32" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                  Skills You Already Have
+                </h4>
+                <div class="sg-pills">
+                  {% if skill_gap.already_have %}
+                    {% for skill in skill_gap.already_have %}
+                      <div class="sg-pill sg-pill-green">&check; {{ skill }}</div>
+                    {% endfor %}
+                  {% else %}
+                    <p style="font-size: 0.85rem; color: var(--warm-brown); font-style: italic;">No overlapping skills identified. The roadmap starts from foundational basics.</p>
+                  {% endif %}
+                </div>
+              </div>
+
+              <!-- Need to Improve -->
+              <div class="skill-gap-card sg-yellow">
+                <h4 class="sg-card-title">
+                  <svg width="18" height="18" fill="#8D6E00" viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+                  Skills You Need to Improve
+                </h4>
+                <div class="sg-pills">
+                  {% if skill_gap.need_improvement %}
+                    {% for skill in skill_gap.need_improvement %}
+                      <div class="sg-pill sg-pill-yellow">&bull; {{ skill }}</div>
+                    {% endfor %}
+                  {% else %}
+                    <p style="font-size: 0.85rem; color: var(--warm-brown); font-style: italic;">No borderline competencies flagged.</p>
+                  {% endif %}
+                </div>
+              </div>
+
+              <!-- Should Learn Next -->
+              <div class="skill-gap-card sg-red">
+                <h4 class="sg-card-title">
+                  <svg width="18" height="18" fill="#C62828" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+                  Skills You Should Learn Next
+                </h4>
+                <div class="sg-pills">
+                  {% if skill_gap.should_learn_next %}
+                    {% for skill in skill_gap.should_learn_next %}
+                      <div class="sg-pill sg-pill-red">&rarr; {{ skill }}</div>
+                    {% endfor %}
+                  {% else %}
+                    <div class="sg-pill sg-pill-green">&check; Core requirements covered! Proceed to Stage 3 projects.</div>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Progress Bar Header for Option 1 -->
+          <div style="background: var(--pure-white); padding: 20px 28px; border-radius: var(--radius-lg); border: 1.5px solid var(--border-color); box-shadow: var(--shadow-sm); margin-bottom: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+              <div>
+                <h3 style="font-size: 1.35rem; color: var(--forest-green); font-weight: 800;">
+                  {{ recommended_meta.title }} – 3-Stage Learning Roadmap
+                </h3>
+                <p style="font-size: 0.88rem; color: var(--text-muted);">
+                  Check off tasks as you finish them. Progress updates live and persists across sign-ins.
+                </p>
+              </div>
+              <div style="text-align: right;">
+                <span id="roadmapPctBadge" class="dash-pill pill-strong" style="font-size: 0.95rem; padding: 6px 16px;">
+                  {{ roadmap_stats.percentage }}% Completed
+                </span>
+                <p id="roadmapCounts" style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">
+                  {{ roadmap_stats.completed }} of {{ roadmap_stats.total }} tasks completed
+                </p>
+              </div>
+            </div>
+
+            <div class="progress-bar-container" style="margin-top: 14px; height: 10px;">
+              <div id="roadmapProgressBar" class="progress-bar-fill" data-width="{{ roadmap_stats.percentage }}"></div>
+            </div>
+          </div>
+
+          <!-- 3 Stages for Option 1 -->
+          {% for stage_key, stage_info in recommended_meta.roadmap.items() %}
+            <div class="roadmap-stage">
+              <div class="roadmap-stage-header">
+                <h4 class="roadmap-stage-name">{{ stage_info.name }}</h4>
+                <p class="roadmap-stage-desc">{{ stage_info.summary }}</p>
+              </div>
+
+              {% for task in stage_info.tasks %}
+                <div class="roadmap-task-item" id="task_item_{{ task.id }}">
+                  <form action="{{ url_for('toggle_roadmap_task') }}" method="POST" class="task-toggle-form" style="display: contents;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="domain_key" value="{{ recommended_meta.id }}">
+                    <input type="hidden" name="task_id" value="{{ task.id }}">
+                    <input type="checkbox"
+                           name="completed"
+                           value="1"
+                           class="roadmap-checkbox"
+                           data-task-id="{{ task.id }}"
+                           data-domain="{{ recommended_meta.id }}"
+                           {% if roadmap_stats.tasks_state.get(task.id, false) %}checked{% endif %}
+                           onchange="handleTaskToggle(this)">
+                  </form>
+
+                  <div class="roadmap-task-content">
+                    <div class="roadmap-task-title">{{ task.title }}</div>
+                    <div class="roadmap-task-summary">{{ task.description }}</div>
+                    <div style="margin-bottom: 8px;">
+                      <span style="font-size: 0.78rem; font-weight: 700; color: var(--warm-brown);">Target Skills:</span>
+                      {% for sk in task.skills %}
+                        <span class="skill-tag" style="font-size: 0.75rem;">{{ sk }}</span>
+                      {% endfor %}
+                    </div>
+                    <div>
+                      <span style="font-size: 0.78rem; font-weight: 700; color: var(--forest-green);">Verified Free Resources:</span>
+                      {% for res in task.resources %}
+                        <a href="{{ res.url }}" target="_blank" rel="noopener noreferrer" class="resource-link">
+                          <svg width="12" height="12" fill="currentColor" viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>
+                          {{ res.name }}
+                        </a>
+                      {% endfor %}
+                    </div>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% endfor %}
+
+          <!-- VERIFIED SOURCES & YOUTUBE BEST RESOURCES FOR OPTION 1 -->
+          <div class="resources-section" style="margin-top: 28px;">
+            <div class="resources-header">
+              <div>
+                <span class="section-tag" style="background: var(--light-sage); color: var(--forest-green-dark); font-size: 0.78rem;">Verified Learning Directory</span>
+                <h3 style="font-size: 1.35rem; color: var(--forest-green); font-weight: 800; margin: 6px 0 6px;">
+                  Top 5 Verified Sources &amp; YouTube Best Resources for {{ recommended_meta.title }}
+                </h3>
+                <p style="font-size: 0.9rem; color: var(--warm-brown); margin: 0; line-height: 1.5;">
+                  Curated recommendations featuring 2 verified free options alongside premier industry professional credentials and high-impact YouTube masterclasses.
+                </p>
+              </div>
+            </div>
+
+            <!-- TOP 5 VERIFIED SOURCES -->
+            <div style="margin-bottom: 28px;">
+              <h4 style="color: var(--forest-green); font-size: 1.15rem; font-weight: 700; margin-bottom: 14px; border-bottom: 1.5px solid var(--light-sage); padding-bottom: 6px;">
+                Top 5 Verified Sources (2 Free &bull; 3 Paid Credentials)
+              </h4>
+              <div class="verified-grid">
+                {% if all_verified_sources and all_verified_sources.get(attempt.recommended_career) %}
+                  {% for src in all_verified_sources[attempt.recommended_career] %}
+                    <div class="verified-card">
+                      <div class="verified-card-top">
+                        <span class="platform-tag">{{ src.platform }}</span>
+                        {% if src.is_free %}
+                          <span class="badge-free">&check; Verified Free</span>
+                        {% else %}
+                          <span class="badge-paid">&#9733; Verified Paid / Credential</span>
+                        {% endif %}
+                      </div>
+                      <h5 class="verified-card-title">{{ src.name }}</h5>
+                      <p class="verified-card-desc">{{ src.description }}</p>
+                      <div class="verified-card-credential">&bull; Credential: {{ src.credential }}</div>
+                      <a href="{{ src.url }}" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm" style="margin-top: auto; text-align: center;">
+                        Visit Verified Source &rarr;
+                      </a>
+                    </div>
+                  {% endfor %}
+                {% endif %}
+              </div>
+            </div>
+
+            <!-- YOUTUBE BEST RESOURCES -->
+            <div>
+              <h4 style="color: var(--forest-green); font-size: 1.15rem; font-weight: 700; margin-bottom: 14px; border-bottom: 1.5px solid var(--light-sage); padding-bottom: 6px;">
+                YouTube Best Resources &amp; Playlists
+              </h4>
+              <div class="yt-grid">
+                {% if all_youtube_resources and all_youtube_resources.get(attempt.recommended_career) %}
+                  {% for yt in all_youtube_resources[attempt.recommended_career] %}
+                    <div class="yt-card">
+                      <div class="yt-badge">
+                        <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M10 15l5.19-3L10 9v6m11.56-7.83c.13.47.22 1.1.28 1.9.07.8.1 1.49.1 2.09L22 12c0 2.19-.16 3.8-.44 4.83-.25.9-.83 1.48-1.73 1.73-.47.13-1.33.22-2.65.28-1.3.07-2.49.1-3.59.1L12 22c-4.19 0-6.8-.16-7.83-.44-.9-.25-1.48-.83-1.73-1.73-.13-.47-.22-1.1-.28-1.9-.07-.8-.1-1.49-.1-2.09L2 12c0-2.19.16-3.8.44-4.83.25-.9.83-1.48 1.73-1.73.47-.13 1.33-.22 2.65-.28 1.3-.07 2.49-.1 3.59-.1L12 2c4.19 0 6.8.16 7.83.44.9.25 1.48.83 1.73 1.73z"/></svg>
+                        Top YouTube Resource
+                      </div>
+                      <h5 class="yt-channel-name">{{ yt.channel }}</h5>
+                      <p class="yt-focus">{{ yt.focus }}</p>
+                      <div class="yt-playlist">
+                        <strong>Recommended:</strong> {{ yt.recommended_playlist }}
+                      </div>
+                      <a href="{{ yt.url }}" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" style="margin-top: auto; text-align: center;">
+                        Watch on YouTube &rarr;
+                      </a>
+                    </div>
+                  {% endfor %}
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================================================================ -->
+        <!-- TAB CONTENT 2: ALTERNATIVE CAREER ROADMAP & SKILL GAP -->
+        <!-- ================================================================ -->
+        {% if alternative_meta %}
+          <div id="tabContentAlt" style="display: none;">
+            <!-- Skill Gap Analysis Card for Option 2 -->
+            <div style="background: var(--pure-white); padding: 24px 28px; border-radius: var(--radius-lg); border: 1.5px solid var(--border-color); box-shadow: var(--shadow-sm); margin-bottom: 24px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
+                <div>
+                  <span class="section-tag" style="margin-bottom: 2px;">Skill Analysis</span>
+                  <h3 style="font-size: 1.3rem; color: var(--forest-green); font-weight: 700;">
+                    Skill Gap for {{ alternative_meta.title }}
+                  </h3>
+                </div>
+                <!-- Selection CTA Form -->
+                <form action="{{ url_for('select_career_track') }}" method="POST">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="hidden" name="assessment_id" value="{{ attempt.id }}">
+                  <input type="hidden" name="chosen_career" value="{{ alternative_meta.id }}">
+                  <button type="submit" class="btn btn-accent btn-sm">
+                    &star; Set {{ alternative_meta.title }} as My Active Dashboard Track
+                  </button>
+                </form>
+              </div>
+
+              <div class="skill-gap-grid" style="margin-bottom: 0;">
+                <!-- Already Have -->
+                <div class="skill-gap-card sg-green">
+                  <h4 class="sg-card-title">
+                    <svg width="18" height="18" fill="#2E7D32" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                    Skills You Already Have
+                  </h4>
+                  <div class="sg-pills">
+                    {% if alt_skill_gap.already_have %}
+                      {% for skill in alt_skill_gap.already_have %}
+                        <div class="sg-pill sg-pill-green">&check; {{ skill }}</div>
+                      {% endfor %}
+                    {% else %}
+                      <p style="font-size: 0.85rem; color: var(--warm-brown); font-style: italic;">No overlapping skills identified yet.</p>
+                    {% endif %}
+                  </div>
+                </div>
+
+                <!-- Need to Improve -->
+                <div class="skill-gap-card sg-yellow">
+                  <h4 class="sg-card-title">
+                    <svg width="18" height="18" fill="#8D6E00" viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+                    Skills You Need to Improve
+                  </h4>
+                  <div class="sg-pills">
+                    {% if alt_skill_gap.need_improvement %}
+                      {% for skill in alt_skill_gap.need_improvement %}
+                        <div class="sg-pill sg-pill-yellow">&bull; {{ skill }}</div>
+                      {% endfor %}
+                    {% else %}
+                      <p style="font-size: 0.85rem; color: var(--warm-brown); font-style: italic;">No borderline competencies flagged.</p>
+                    {% endif %}
+                  </div>
+                </div>
+
+                <!-- Should Learn Next -->
+                <div class="skill-gap-card sg-red">
+                  <h4 class="sg-card-title">
+                    <svg width="18" height="18" fill="#C62828" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+                    Skills You Should Learn Next
+                  </h4>
+                  <div class="sg-pills">
+                    {% if alt_skill_gap.should_learn_next %}
+                      {% for skill in alt_skill_gap.should_learn_next %}
+                        <div class="sg-pill sg-pill-red">&rarr; {{ skill }}</div>
+                      {% endfor %}
+                    {% else %}
+                      <div class="sg-pill sg-pill-green">&check; Core requirements covered! Proceed to Stage 3 projects.</div>
+                    {% endif %}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Progress Bar Header for Option 2 -->
+            <div style="background: var(--pure-white); padding: 20px 28px; border-radius: var(--radius-lg); border: 1.5px solid var(--border-color); box-shadow: var(--shadow-sm); margin-bottom: 20px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                <div>
+                  <h3 style="font-size: 1.35rem; color: var(--forest-green); font-weight: 800;">
+                    {{ alternative_meta.title }} – 3-Stage Learning Roadmap
+                  </h3>
+                  <p style="font-size: 0.88rem; color: var(--text-muted);">
+                    Alternative curriculum track tailored to your secondary affinity score.
+                  </p>
+                </div>
+                <div style="text-align: right;">
+                  <span id="altRoadmapPctBadge" class="dash-pill pill-dev" style="font-size: 0.95rem; padding: 6px 16px;">
+                    {{ alt_roadmap_stats.percentage if alt_roadmap_stats else 0 }}% Completed
+                  </span>
+                  <p id="altRoadmapCounts" style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">
+                    {{ alt_roadmap_stats.completed if alt_roadmap_stats else 0 }} of {{ alt_roadmap_stats.total if alt_roadmap_stats else 0 }} tasks completed
+                  </p>
+                </div>
+              </div>
+
+              <div class="progress-bar-container" style="margin-top: 14px; height: 10px;">
+                <div id="altRoadmapProgressBar" class="progress-bar-fill" data-width="{{ alt_roadmap_stats.percentage if alt_roadmap_stats else 0 }}"></div>
+              </div>
+            </div>
+
+            <!-- 3 Stages for Option 2 -->
+            {% for stage_key, stage_info in alternative_meta.roadmap.items() %}
+              <div class="roadmap-stage">
+                <div class="roadmap-stage-header">
+                  <h4 class="roadmap-stage-name">{{ stage_info.name }}</h4>
+                  <p class="roadmap-stage-desc">{{ stage_info.summary }}</p>
+                </div>
+
+                {% for task in stage_info.tasks %}
+                  <div class="roadmap-task-item" id="task_item_{{ task.id }}">
+                    <form action="{{ url_for('toggle_roadmap_task') }}" method="POST" class="task-toggle-form" style="display: contents;">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <input type="hidden" name="domain_key" value="{{ alternative_meta.id }}">
+                      <input type="hidden" name="task_id" value="{{ task.id }}">
+                      <input type="checkbox"
+                             name="completed"
+                             value="1"
+                             class="roadmap-checkbox"
+                             data-task-id="{{ task.id }}"
+                             data-domain="{{ alternative_meta.id }}"
+                             {% if alt_roadmap_stats and alt_roadmap_stats.tasks_state.get(task.id, false) %}checked{% endif %}
+                             onchange="handleTaskToggle(this)">
+                    </form>
+
+                    <div class="roadmap-task-content">
+                      <div class="roadmap-task-title">{{ task.title }}</div>
+                      <div class="roadmap-task-summary">{{ task.description }}</div>
+                      <div style="margin-bottom: 8px;">
+                        <span style="font-size: 0.78rem; font-weight: 700; color: var(--warm-brown);">Target Skills:</span>
+                        {% for sk in task.skills %}
+                          <span class="skill-tag" style="font-size: 0.75rem;">{{ sk }}</span>
+                        {% endfor %}
+                      </div>
+                      <div>
+                        <span style="font-size: 0.78rem; font-weight: 700; color: var(--forest-green);">Verified Free Resources:</span>
+                        {% for res in task.resources %}
+                          <a href="{{ res.url }}" target="_blank" rel="noopener noreferrer" class="resource-link">
+                            <svg width="12" height="12" fill="currentColor" viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>
+                            {{ res.name }}
+                          </a>
+                        {% endfor %}
+                      </div>
+                    </div>
+                  </div>
+                {% endfor %}
+              </div>
+            {% endfor %}
+
+            <!-- VERIFIED SOURCES & YOUTUBE BEST RESOURCES FOR OPTION 2 -->
+            <div class="resources-section" style="margin-top: 28px;">
+              <div class="resources-header">
+                <div>
+                  <span class="section-tag" style="background: var(--light-sage); color: var(--forest-green-dark); font-size: 0.78rem;">Verified Learning Directory</span>
+                  <h3 style="font-size: 1.35rem; color: var(--forest-green); font-weight: 800; margin: 6px 0 6px;">
+                    Top 5 Verified Sources &amp; YouTube Best Resources for {{ alternative_meta.title }}
+                  </h3>
+                  <p style="font-size: 0.9rem; color: var(--warm-brown); margin: 0; line-height: 1.5;">
+                    Curated recommendations featuring 2 verified free options alongside premier industry professional credentials and high-impact YouTube masterclasses.
+                  </p>
+                </div>
+              </div>
+
+              <!-- TOP 5 VERIFIED SOURCES -->
+              <div style="margin-bottom: 28px;">
+                <h4 style="color: var(--forest-green); font-size: 1.15rem; font-weight: 700; margin-bottom: 14px; border-bottom: 1.5px solid var(--light-sage); padding-bottom: 6px;">
+                  Top 5 Verified Sources (2 Free &bull; 3 Paid Credentials)
+                </h4>
+                <div class="verified-grid">
+                  {% if all_verified_sources and all_verified_sources.get(attempt.alternative_career) %}
+                    {% for src in all_verified_sources[attempt.alternative_career] %}
+                      <div class="verified-card">
+                        <div class="verified-card-top">
+                          <span class="platform-tag">{{ src.platform }}</span>
+                          {% if src.is_free %}
+                            <span class="badge-free">&check; Verified Free</span>
+                          {% else %}
+                            <span class="badge-paid">&#9733; Verified Paid / Credential</span>
+                          {% endif %}
+                        </div>
+                        <h5 class="verified-card-title">{{ src.name }}</h5>
+                        <p class="verified-card-desc">{{ src.description }}</p>
+                        <div class="verified-card-credential">&bull; Credential: {{ src.credential }}</div>
+                        <a href="{{ src.url }}" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm" style="margin-top: auto; text-align: center;">
+                          Visit Verified Source &rarr;
+                        </a>
+                      </div>
+                    {% endfor %}
+                  {% endif %}
+                </div>
+              </div>
+
+              <!-- YOUTUBE BEST RESOURCES -->
+              <div>
+                <h4 style="color: var(--forest-green); font-size: 1.15rem; font-weight: 700; margin-bottom: 14px; border-bottom: 1.5px solid var(--light-sage); padding-bottom: 6px;">
+                  YouTube Best Resources &amp; Playlists
+                </h4>
+                <div class="yt-grid">
+                  {% if all_youtube_resources and all_youtube_resources.get(attempt.alternative_career) %}
+                    {% for yt in all_youtube_resources[attempt.alternative_career] %}
+                      <div class="yt-card">
+                        <div class="yt-badge">
+                          <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M10 15l5.19-3L10 9v6m11.56-7.83c.13.47.22 1.1.28 1.9.07.8.1 1.49.1 2.09L22 12c0 2.19-.16 3.8-.44 4.83-.25.9-.83 1.48-1.73 1.73-.47.13-1.33.22-2.65.28-1.3.07-2.49.1-3.59.1L12 22c-4.19 0-6.8-.16-7.83-.44-.9-.25-1.48-.83-1.73-1.73-.13-.47-.22-1.1-.28-1.9-.07-.8-.1-1.49-.1-2.09L2 12c0-2.19.16-3.8.44-4.83.25-.9.83-1.48 1.73-1.73.47-.13 1.33-.22 2.65-.28 1.3-.07 2.49-.1 3.59-.1L12 2c4.19 0 6.8.16 7.83.44.9.25 1.48.83 1.73 1.73z"/></svg>
+                          Top YouTube Resource
+                        </div>
+                        <h5 class="yt-channel-name">{{ yt.channel }}</h5>
+                        <p class="yt-focus">{{ yt.focus }}</p>
+                        <div class="yt-playlist">
+                          <strong>Recommended:</strong> {{ yt.recommended_playlist }}
+                        </div>
+                        <a href="{{ yt.url }}" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" style="margin-top: auto; text-align: center;">
+                          Watch on YouTube &rarr;
+                        </a>
+                      </div>
+                    {% endfor %}
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+
+            <!-- Switch Pathway CTA Box -->
+            <div style="background: var(--light-sage); padding: 24px; border-radius: var(--radius-lg); text-align: center; border: 2px solid var(--sage-green); margin-top: 24px;">
+              <h4 style="color: var(--forest-green); font-size: 1.2rem; margin-bottom: 6px;">
+                Prefer {{ alternative_meta.title }} as your main direction?
+              </h4>
+              <p style="font-size: 0.92rem; color: var(--text-dark); max-width: 600px; margin: 0 auto 16px;">
+                You can set this track as your active dashboard roadmap at any time. Your progress on both paths is saved.
+              </p>
+              <form action="{{ url_for('select_career_track') }}" method="POST" style="display: inline-block;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="assessment_id" value="{{ attempt.id }}">
+                <input type="hidden" name="chosen_career" value="{{ alternative_meta.id }}">
+                <button type="submit" class="btn btn-primary" style="padding: 12px 32px;">
+                  &check; Make {{ alternative_meta.title }} My Active Dashboard Track
+                </button>
+              </form>
+            </div>
+          </div>
+        {% endif %}
+      </div>
+
+      <!-- 5-DOMAIN APTITUDE COMPARISON -->
+      <div style="margin-bottom: 36px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 16px;">
+          <div>
+            <span class="section-tag" style="margin-bottom: 4px;">Full Diagnostic Breakdown</span>
+            <h3 style="font-size: 1.4rem; color: var(--forest-green); font-weight: 700;">Performance Across All 5 Tech Domains</h3>
+          </div>
+          <span style="font-size: 0.85rem; color: var(--text-muted);">Each evaluated out of 5 marks</span>
+        </div>
+
+        <div class="domain-scores-grid">
+          {% for dom_key, score_data in domain_scores.items() %}
+            <div class="domain-score-box{% if dom_key == attempt.recommended_career %} dsb-recommended{% elif dom_key == attempt.alternative_career %} dsb-alternative{% endif %}">
+              <div class="domain-score-title">{{ score_data.title }}</div>
+              <div class="domain-score-val">{{ score_data.score }} <span style="font-size: 1rem; color: var(--text-muted); font-weight: 500;">/ 5</span></div>
+              <div style="margin: 8px 0;">
+                <span class="dash-pill {% if score_data.percentage >= 70 %}pill-strong{% elif score_data.percentage >= 40 %}pill-dev{% else %}pill-beg{% endif %}">
+                  {{ score_data.percentage }}% &bull; {{ score_data.level }}
+                </span>
+              </div>
+              <div class="progress-bar-container" style="height: 6px; margin-top: 8px;">
+                <div class="progress-bar-fill" data-width="{{ score_data.percentage }}"></div>
+              </div>
+              {% if score_data.unversed and score_data.unversed > 0 %}
+                <div style="font-size: 0.76rem; color: var(--warm-brown); margin-top: 6px;">
+                  ({{ score_data.unversed }} marked as Unversed)
+                </div>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- NEXT STEPS & ACTION BUTTONS -->
+      <div style="background: var(--warm-cream); border-radius: var(--radius-lg); padding: 28px; border: 1.5px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+        <div>
+          <h4 style="color: var(--forest-green); font-size: 1.1rem; margin-bottom: 4px;">Ready to build your skills?</h4>
+          <p style="font-size: 0.88rem; color: var(--text-muted);">
+            {% if is_eligible %}
+              You are eligible to retake the 25-MCQ skill evaluation today to test your updated skills.
+            {% else %}
+              Next assessment retake will unlock on <strong>{{ next_eligible_date }}</strong>.
+            {% endif %}
+          </p>
+        </div>
+        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+          <a href="{{ url_for('dashboard') }}" class="btn btn-primary">Return to Dashboard</a>
+          {% if is_eligible %}
+            <a href="{{ url_for('assessment') }}" class="btn btn-accent">Retake Assessment</a>
+          {% endif %}
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Consistent Nature-Themed Footer -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-bottom">
+        &copy; 2026 CareerCompass &bull; AI & Data Science Engineering SDG Project &bull; Built with Flask & Nature-Themed CSS.
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Tab switching between Option 1 (Primary) and Option 2 (Alternative) roadmaps
+    function switchRoadmapTab(tab) {
+      const tabBtnRec = document.getElementById('tabBtnRec');
+      const tabBtnAlt = document.getElementById('tabBtnAlt');
+      const tabContentRec = document.getElementById('tabContentRec');
+      const tabContentAlt = document.getElementById('tabContentAlt');
+
+      if (tab === 'rec') {
+        if (tabBtnRec) tabBtnRec.classList.add('active');
+        if (tabBtnAlt) tabBtnAlt.classList.remove('active');
+        if (tabContentRec) tabContentRec.style.display = 'block';
+        if (tabContentAlt) tabContentAlt.style.display = 'none';
+      } else {
+        if (tabBtnAlt) tabBtnAlt.classList.add('active');
+        if (tabBtnRec) tabBtnRec.classList.remove('active');
+        if (tabContentAlt) tabContentAlt.style.display = 'block';
+        if (tabContentRec) tabContentRec.style.display = 'none';
+      }
+    }
+
+    // Asynchronous task toggle with instant UI feedback and CSRF security
+    async function handleTaskToggle(checkbox) {
+      const taskId = checkbox.dataset.taskId;
+      const domainKey = checkbox.dataset.domain;
+      const isChecked = checkbox.checked ? '1' : '0';
+      const csrfToken = document.querySelector('input[name="csrf_token"]').value;
+
+      const formData = new FormData();
+      formData.append('csrf_token', csrfToken);
+      formData.append('domain_key', domainKey);
+      formData.append('task_id', taskId);
+      formData.append('completed', isChecked);
+
+      try {
+        const response = await fetch("{{ url_for('toggle_roadmap_task') }}", {
+          method: "POST",
+          headers: {
+            "X-Requested-With": "XMLHttpRequest"
+          },
+          body: formData
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          // Check if toggled domain matches recommended or alternative
+          const isRecDomain = domainKey === "{{ recommended_meta.id }}";
+
+          const bar = isRecDomain ? document.getElementById('roadmapProgressBar') : document.getElementById('altRoadmapProgressBar');
+          const badge = isRecDomain ? document.getElementById('roadmapPctBadge') : document.getElementById('altRoadmapPctBadge');
+          const counts = isRecDomain ? document.getElementById('roadmapCounts') : document.getElementById('altRoadmapCounts');
+
+          if (bar) bar.style.width = data.percentage + '%';
+          if (badge) badge.textContent = data.percentage + '% Completed';
+          if (counts) counts.textContent = `${data.completed_count} of ${data.total_count} tasks completed`;
+        } else {
+          checkbox.closest('form').submit();
+        }
+      } catch (err) {
+        checkbox.closest('form').submit();
+      }
+    }
+
+    // Responsive Mobile Menu Toggle
+    const navToggle = document.getElementById('mobileNavToggle');
+    const navLinks = document.getElementById('navLinks');
+    if (navToggle && navLinks) {
+      navToggle.addEventListener('click', function() {
+        navLinks.classList.toggle('show');
+      });
+    }
+
+    // Apply data-width values to progress bars (avoids inline Jinja CSS linter errors)
+    function initProgressBars() {
+      document.querySelectorAll('.progress-bar-fill[data-width]').forEach(function(bar) {
+        var w = parseFloat(bar.getAttribute('data-width')) || 0;
+        bar.style.width = w + '%';
+      });
+    }
+    document.addEventListener('DOMContentLoaded', function() {
+      initProgressBars();
+    });
+  </script>
+</body>
+</html>
