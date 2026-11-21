@@ -622,6 +622,61 @@ class CareerCompassTestCase(unittest.TestCase):
         finally:
             flask_app.app.config["WTF_CSRF_ENABLED"] = False
 
+    # ------------------------------------------------------------------------
+    # 17. PRODUCTION DATABASE ERROR RESILIENCE (NO HTTP 500)
+    # ------------------------------------------------------------------------
+    def test_registration_database_error_handling_graceful(self):
+        """Verify database errors during registration return a user-friendly error instead of HTTP 500."""
+        from unittest.mock import patch
+        with patch.object(flask_app, "get_db") as mock_get_db:
+            import sqlite3
+            mock_db = mock_get_db.return_value
+            mock_cursor = mock_db.cursor.return_value
+            # Simulate a database failure (e.g. read-only disk or database locked)
+            mock_cursor.execute.side_effect = sqlite3.OperationalError("attempt to write a readonly database")
+            
+            res = self.client.post("/register", data={
+                "full_name": "Test User",
+                "email": "testdbfailure@test.com",
+                "password": "Password123",
+                "college_name": "COEP",
+                "branch": "Computer Engineering",
+                "academic_year": "Second Year (SE)"
+            })
+            # Must NOT return HTTP 500
+            self.assertEqual(res.status_code, 200)
+            self.assertIn("A temporary database error occurred", res.data.decode("utf-8"))
+            mock_db.rollback.assert_called()
+
+    # ------------------------------------------------------------------------
+    # 18. DATABASE PATH RESOLUTION AND DIRECTORY CREATION
+    # ------------------------------------------------------------------------
+    def test_resolve_database_path_configurations(self):
+        """Verify resolve_database_path handles DATABASE_PATH, sqlite:/// DATABASE_URL, and creates directories."""
+        from unittest.mock import patch
+        import tempfile
+        temp_dir = tempfile.mkdtemp()
+        nested_db = os.path.join(temp_dir, "nested_folder", "careercompass.db")
+        
+        # Test DATABASE_PATH with nested directory
+        with patch.dict(os.environ, {"DATABASE_PATH": nested_db, "DATABASE_URL": ""}):
+            resolved = flask_app.resolve_database_path()
+            self.assertEqual(resolved, os.path.abspath(nested_db))
+            self.assertTrue(os.path.isdir(os.path.dirname(resolved)))
+
+        # Test DATABASE_URL with sqlite:/// URI
+        sqlite_uri = f"sqlite:///{nested_db}"
+        with patch.dict(os.environ, {"DATABASE_PATH": "", "DATABASE_URL": sqlite_uri}):
+            resolved = flask_app.resolve_database_path()
+            self.assertEqual(resolved, os.path.abspath(nested_db))
+
+        # Cleanup
+        try:
+            import shutil
+            shutil.rmtree(temp_dir)
+        except OSError:
+            pass
+
 
 if __name__ == "__main__":
     unittest.main()

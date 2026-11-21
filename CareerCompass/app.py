@@ -38,11 +38,31 @@ if not secret_key:
     secret_key = "careercompass-dev-fallback-key-replace-in-production"
 app.config["SECRET_KEY"] = secret_key
 
+def resolve_database_path() -> str:
+    """
+    Resolves the SQLite database file path.
+    Supports:
+    1. DATABASE_PATH env var (e.g. /var/data/careercompass.db on persistent volumes)
+    2. DATABASE_URL env var if an SQLite URI is supplied (e.g. sqlite:////var/data/careercompass.db)
+    3. Default local fallback ('careercompass.db' in the project directory).
+    Ensures parent directories exist before connecting.
+    """
+    raw_path = os.environ.get("DATABASE_PATH")
+    if not raw_path:
+        db_url = os.environ.get("DATABASE_URL")
+        if db_url and db_url.startswith("sqlite:///"):
+            raw_path = db_url[len("sqlite:///"):]
+
+    if not raw_path:
+        raw_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), "careercompass.db")
+
+    abs_path = os.path.abspath(raw_path)
+    os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+    return abs_path
+
+
 # Database path configuration
-app.config["DATABASE_PATH"] = os.environ.get(
-    "DATABASE_PATH",
-    os.path.join(os.path.abspath(os.path.dirname(__file__)), "careercompass.db")
-)
+app.config["DATABASE_PATH"] = resolve_database_path()
 
 # Cookie & Session Security
 is_production = os.environ.get("FLASK_ENV") == "production"
@@ -72,9 +92,16 @@ limiter = Limiter(
 def get_db():
     """Returns the database connection for the current request context."""
     if "db" not in g:
-        g.db = sqlite3.connect(app.config["DATABASE_PATH"])
+        db_path = app.config["DATABASE_PATH"]
+        os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
+        g.db = sqlite3.connect(db_path, timeout=30.0)
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON;")
+        try:
+            g.db.execute("PRAGMA journal_mode = WAL;")
+        except sqlite3.Error:
+            pass
+        g.db.execute("PRAGMA busy_timeout = 30000;")
     return g.db
 
 
@@ -88,8 +115,15 @@ def close_db(exception=None):
 
 def init_db():
     """Initializes database schema if tables do not exist."""
-    db = sqlite3.connect(app.config["DATABASE_PATH"])
+    db_path = app.config["DATABASE_PATH"]
+    os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
+    db = sqlite3.connect(db_path, timeout=30.0)
     db.execute("PRAGMA foreign_keys = ON;")
+    try:
+        db.execute("PRAGMA journal_mode = WAL;")
+    except sqlite3.Error:
+        pass
+    db.execute("PRAGMA busy_timeout = 30000;")
     cursor = db.cursor()
 
     cursor.executescript("""
@@ -441,30 +475,66 @@ def register():
                 }
             )
 
-        # Check existing account
+        # Check existing account and create user record with robust transaction handling
         db = get_db()
         cursor = db.cursor()
-        cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
-        if cursor.fetchone():
+        try:
+            cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
+            if cursor.fetchone():
+                flash("An account with this email address already exists. Please sign in.", "error")
+                return render_template("index.html", view_mode="login", form_data={"email": email})
+
+            # Secure password hash using pbkdf2 / scrypt
+            pw_hash = generate_password_hash(password, method="scrypt")
+            now_str = datetime.now(timezone.utc).isoformat()
+
+            cursor.execute("""
+                INSERT INTO users (full_name, email, password_hash, college_name, branch, academic_year, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (full_name, email, pw_hash, college_name, branch, academic_year, now_str))
+            user_id = cursor.lastrowid
+
+            # Initialize blank profile
+            cursor.execute("""
+                INSERT INTO profiles (user_id, technical_skills, interests, preferred_career, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (user_id, json.dumps([]), json.dumps([]), "", now_str))
+            db.commit()
+
+        except sqlite3.IntegrityError:
+            db.rollback()
             flash("An account with this email address already exists. Please sign in.", "error")
             return render_template("index.html", view_mode="login", form_data={"email": email})
-
-        # Secure password hash using pbkdf2 / scrypt
-        pw_hash = generate_password_hash(password, method="scrypt")
-        now_str = datetime.now(timezone.utc).isoformat()
-
-        cursor.execute("""
-            INSERT INTO users (full_name, email, password_hash, college_name, branch, academic_year, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (full_name, email, pw_hash, college_name, branch, academic_year, now_str))
-        user_id = cursor.lastrowid
-
-        # Initialize blank profile
-        cursor.execute("""
-            INSERT INTO profiles (user_id, technical_skills, interests, preferred_career, updated_at)
-            VALUES (?, ?, ?, ?, ?)
-        """, (user_id, json.dumps([]), json.dumps([]), "", now_str))
-        db.commit()
+        except sqlite3.Error as e:
+            db.rollback()
+            app.logger.error("Database error during student registration: %s", str(e))
+            flash("A temporary database error occurred while creating your account. Please try again.", "error")
+            return render_template(
+                "index.html",
+                view_mode="register",
+                form_data={
+                    "full_name": full_name,
+                    "email": email,
+                    "college_name": college_name,
+                    "branch": branch,
+                    "academic_year": academic_year
+                }
+            )
+        except Exception as e:
+            db.rollback()
+            app.logger.error("Unexpected error during student registration: %s", str(e))
+            flash("An unexpected error occurred while processing your registration. Please try again.", "error")
+            return render_template(
+                "index.html",
+                view_mode="register",
+                form_data={
+                    "full_name": full_name,
+                    "email": email,
+                    "college_name": college_name,
+                    "branch": branch,
+                    "academic_year": academic_year
+                }
+            )
 
         # Regenerate session on registration/login
         session.clear()
@@ -543,25 +613,38 @@ def profile():
         now_str = datetime.now(timezone.utc).isoformat()
         db = get_db()
         cursor = db.cursor()
-        cursor.execute("""
-            INSERT INTO profiles (user_id, technical_skills, interests, preferred_career, updated_at)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET
-                technical_skills = excluded.technical_skills,
-                interests = excluded.interests,
-                preferred_career = excluded.preferred_career,
-                updated_at = excluded.updated_at
-        """, (
-            user["id"],
-            json.dumps(valid_skills),
-            json.dumps(valid_interests),
-            preferred_career,
-            now_str
-        ))
-        db.commit()
-
-        flash("Your profile details have been saved successfully!", "success")
-        return redirect(url_for("dashboard"))
+        try:
+            cursor.execute("""
+                INSERT INTO profiles (user_id, technical_skills, interests, preferred_career, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    technical_skills = excluded.technical_skills,
+                    interests = excluded.interests,
+                    preferred_career = excluded.preferred_career,
+                    updated_at = excluded.updated_at
+            """, (
+                user["id"],
+                json.dumps(valid_skills),
+                json.dumps(valid_interests),
+                preferred_career,
+                now_str
+            ))
+            db.commit()
+            flash("Your profile details have been saved successfully!", "success")
+            return redirect(url_for("dashboard"))
+        except sqlite3.Error as e:
+            db.rollback()
+            app.logger.error("Database error updating profile: %s", str(e))
+            flash("A temporary database error occurred while updating your profile. Please try again.", "error")
+            return render_template(
+                "index.html",
+                view_mode="profile",
+                user=user,
+                profile=current_profile,
+                active_skills=valid_skills,
+                active_interests=valid_interests,
+                active_pref_career=preferred_career
+            )
 
     return render_template(
         "index.html",
@@ -733,41 +816,46 @@ def submit_assessment():
     profile = get_user_profile(user["id"])
     evaluation = career_data.evaluate_assessment(submitted_answers, question_ids, profile)
 
-    # Save attempt in database
+    # Save attempt in database with transaction safety
     now_str = datetime.now(timezone.utc).isoformat()
     db = get_db()
     cursor = db.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO assessments (
+                user_id, taken_at, recommended_career, alternative_career,
+                score_total, percentage_total, domain_scores_json, explanation, question_ids_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            user["id"],
+            now_str,
+            evaluation["recommended_career"],
+            evaluation["alternative_career"],
+            evaluation["total_score"],
+            evaluation["overall_percentage"],
+            json.dumps(evaluation["domain_scores"]),
+            evaluation["recommendation_explanation"],
+            json.dumps(question_ids)
+        ))
+        assessment_id = cursor.lastrowid
 
-    cursor.execute("""
-        INSERT INTO assessments (
-            user_id, taken_at, recommended_career, alternative_career,
-            score_total, percentage_total, domain_scores_json, explanation, question_ids_json
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        user["id"],
-        now_str,
-        evaluation["recommended_career"],
-        evaluation["alternative_career"],
-        evaluation["total_score"],
-        evaluation["overall_percentage"],
-        json.dumps(evaluation["domain_scores"]),
-        evaluation["recommendation_explanation"],
-        json.dumps(question_ids)
-    ))
-    assessment_id = cursor.lastrowid
+        # Auto-initialize roadmap task rows for recommended career
+        rec_domain = evaluation["recommended_career"]
+        domain_meta = career_data.CAREER_DOMAINS[rec_domain]
+        for stage_data in domain_meta["roadmap"].values():
+            for task in stage_data["tasks"]:
+                cursor.execute("""
+                    INSERT OR IGNORE INTO roadmap_progress (user_id, career_domain, task_id, completed, updated_at)
+                    VALUES (?, ?, ?, 0, ?)
+                """, (user["id"], rec_domain, task["id"], now_str))
 
-    # Auto-initialize roadmap task rows for recommended career
-    rec_domain = evaluation["recommended_career"]
-    domain_meta = career_data.CAREER_DOMAINS[rec_domain]
-    for stage_data in domain_meta["roadmap"].values():
-        for task in stage_data["tasks"]:
-            cursor.execute("""
-                INSERT OR IGNORE INTO roadmap_progress (user_id, career_domain, task_id, completed, updated_at)
-                VALUES (?, ?, ?, 0, ?)
-            """, (user["id"], rec_domain, task["id"], now_str))
-
-    db.commit()
+        db.commit()
+    except sqlite3.Error as e:
+        db.rollback()
+        app.logger.error("Database error saving assessment attempt: %s", str(e))
+        flash("A database error occurred while saving your assessment. Please try submitting again.", "error")
+        return redirect(url_for("assessment"))
 
     # Clear session question IDs
     session.pop("active_assessment_qids", None)
@@ -908,28 +996,34 @@ def select_career_track():
     other_career = current_rec if chosen_career == current_alt else current_alt
     now_str = datetime.now(timezone.utc).isoformat()
 
-    cursor.execute("""
-        UPDATE assessments
-        SET recommended_career = ?, alternative_career = ?
-        WHERE id = ? AND user_id = ?
-    """, (chosen_career, other_career, assessment_id, user["id"]))
+    try:
+        cursor.execute("""
+            UPDATE assessments
+            SET recommended_career = ?, alternative_career = ?
+            WHERE id = ? AND user_id = ?
+        """, (chosen_career, other_career, assessment_id, user["id"]))
 
-    cursor.execute("""
-        UPDATE profiles
-        SET preferred_career = ?, updated_at = ?
-        WHERE user_id = ?
-    """, (chosen_career, now_str, user["id"]))
+        cursor.execute("""
+            UPDATE profiles
+            SET preferred_career = ?, updated_at = ?
+            WHERE user_id = ?
+        """, (chosen_career, now_str, user["id"]))
 
-    # Initialize roadmap tasks for chosen career in case they are not yet initialized
-    chosen_meta = career_data.CAREER_DOMAINS[chosen_career]
-    for stage_data in chosen_meta["roadmap"].values():
-        for task in stage_data["tasks"]:
-            cursor.execute("""
-                INSERT OR IGNORE INTO roadmap_progress (user_id, career_domain, task_id, completed, updated_at)
-                VALUES (?, ?, ?, 0, ?)
-            """, (user["id"], chosen_career, task["id"], now_str))
+        # Initialize roadmap tasks for chosen career in case they are not yet initialized
+        chosen_meta = career_data.CAREER_DOMAINS[chosen_career]
+        for stage_data in chosen_meta["roadmap"].values():
+            for task in stage_data["tasks"]:
+                cursor.execute("""
+                    INSERT OR IGNORE INTO roadmap_progress (user_id, career_domain, task_id, completed, updated_at)
+                    VALUES (?, ?, ?, 0, ?)
+                """, (user["id"], chosen_career, task["id"], now_str))
 
-    db.commit()
+        db.commit()
+    except sqlite3.Error as e:
+        db.rollback()
+        app.logger.error("Database error updating career track: %s", str(e))
+        flash("A temporary database error occurred while selecting your track. Please try again.", "error")
+        return redirect(url_for("view_results", assessment_id=assessment_id))
 
     chosen_title = career_data.CAREER_DOMAINS[chosen_career]["title"]
     flash(f"Success! You have selected {chosen_title} as your active primary career roadmap and dashboard focus.", "success")
@@ -957,14 +1051,22 @@ def toggle_roadmap_task():
 
     db = get_db()
     cursor = db.cursor()
-    cursor.execute("""
-        INSERT INTO roadmap_progress (user_id, career_domain, task_id, completed, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(user_id, career_domain, task_id) DO UPDATE SET
-            completed = excluded.completed,
-            updated_at = excluded.updated_at
-    """, (user["id"], domain_key, task_id, is_completed, now_str))
-    db.commit()
+    try:
+        cursor.execute("""
+            INSERT INTO roadmap_progress (user_id, career_domain, task_id, completed, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, career_domain, task_id) DO UPDATE SET
+                completed = excluded.completed,
+                updated_at = excluded.updated_at
+        """, (user["id"], domain_key, task_id, is_completed, now_str))
+        db.commit()
+    except sqlite3.Error as e:
+        db.rollback()
+        app.logger.error("Database error toggling task: %s", str(e))
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return jsonify({"status": "error", "message": "Database error updating task."}), 500
+        flash("A database error occurred while updating task progress.", "error")
+        return redirect(url_for("dashboard"))
 
     stats = get_roadmap_stats(user["id"], domain_key)
 
